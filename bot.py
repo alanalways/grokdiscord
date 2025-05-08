@@ -131,17 +131,22 @@ async def on_message(message):
         if existing_channel:
             logger.info(f"Private channel already exists: {existing_channel.name}")
             await message.channel.send(f"您已經有一個私人頻道：{existing_channel.mention}！")
+            await existing_channel.send(f"歡迎回來！{message.author.mention}，我已準備好與您對話，請隨時發送訊息！")
         else:
             logger.info(f"Creating private channel for {message.author}")
             category = discord.utils.get(guild.categories, name="Private Channels")
             if not category:
                 logger.info("Creating Private Channels category")
                 category = await guild.create_category("Private Channels")
+                # 設置類別權限，限制 @everyone
+                await category.set_permissions(guild.default_role, read_messages=False, view_channel=False)
 
             channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
             try:
                 logger.info(f"Setting permissions for channel {channel.name}")
-                await channel.set_permissions(guild.default_role, read_messages=False)
+                # 限制 @everyone
+                await channel.set_permissions(guild.default_role, read_messages=False, view_channel=False)
+                # 允許用戶和 Bot 訪問
                 await channel.set_permissions(message.author, read_messages=True, send_messages=True)
                 await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
 
@@ -150,7 +155,9 @@ async def on_message(message):
                     await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
 
                 await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
-                logger.info(f"Private channel created and permissions set for {message.author}")
+                # Bot 進入頻道並發送歡迎訊息
+                await channel.send(f"歡迎！{message.author.mention}，我已進入此頻道，隨時可以開始對話！請告訴我您的需求！")
+                logger.info(f"Private channel created, permissions set, and welcome message sent for {message.author}")
             except discord.errors.Forbidden as e:
                 logger.error(f"Permission error: {e}")
                 await message.channel.send("我缺少管理頻道的權限！請確保我有 'Manage Channels' 權限，並且我的角色層級高於 @everyone。")
@@ -160,7 +167,7 @@ async def on_message(message):
         return
 
     # 在私人頻道內一問一答
-    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name.lower()}"):
+    if isinstance(message.channel, discord.TextChannel) and channel.name.startswith(f"private-{message.author.name.lower()}"):
         logger.info(f"Processing message in private channel for {message.author}")
         # 檢查是否為刪除頻道指令
         if message.content.lower() == "!delete":
