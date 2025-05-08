@@ -6,6 +6,11 @@ import sqlite3
 from datetime import datetime
 from bs4 import BeautifulSoup
 from flask import Flask
+import logging
+
+# 設置日誌
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -99,14 +104,21 @@ def health_check():
 # 自動創建私人頻道（觸發於標記 Bot）
 @bot.event
 async def on_message(message):
+    logger.info(f"Received message: {message.content} from {message.author}")
     if message.author == bot.user:
         return
 
     user_id = str(message.author.id)
     guild = message.guild
 
+    # 測試 ping 命令
+    if message.content.lower() == "!ping":
+        await message.channel.send("Pong!")
+        return
+
     # 觸發私人頻道創建
     if bot.user.mentioned_in(message) and not any(channel.name.startswith(f"private-{message.author.name}") for channel in guild.channels):
+        logger.info(f"Creating private channel for {message.author}")
         category = discord.utils.get(guild.categories, name="Private Channels")
         if not category:
             category = await guild.create_category("Private Channels")
@@ -128,6 +140,7 @@ async def on_message(message):
 
     # 在私人頻道內一問一答
     if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name}"):
+        logger.info(f"Processing message in private channel for {message.author}")
         # 檢查是否為刪除頻道指令
         if message.content.lower() == "!delete":
             await message.channel.send("正在刪除此頻道...")
@@ -170,7 +183,7 @@ async def on_message(message):
 
 @bot.event
 async def on_ready():
-    print(f'{bot.user} 已上線！')
+    logger.info(f'{bot.user} 已上線！')
 
 # 啟動 Flask 和 Bot
 if __name__ == "__main__":
