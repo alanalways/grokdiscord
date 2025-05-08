@@ -5,6 +5,7 @@ import requests
 import sqlite3
 from datetime import datetime
 from bs4 import BeautifulSoup
+from flask import Flask
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -88,6 +89,13 @@ def is_image_generation_request(message):
     keywords = ["生成圖片", "畫", "圖片", "繪製", "create image", "draw"]
     return any(keyword in message.lower() for keyword in keywords)
 
+app = Flask(__name__)
+
+# 虛擬 Web 端點，滿足 Render 端口要求
+@app.route('/')
+def health_check():
+    return "Bot is running", 200
+
 # 自動創建私人頻道（觸發於標記 Bot）
 @bot.event
 async def on_message(message):
@@ -161,4 +169,9 @@ async def on_message(message):
 async def on_ready():
     print(f'{bot.user} 已上線！')
 
-bot.run(os.environ['DISCORD_TOKEN'])
+# 啟動 Flask 和 Bot
+if __name__ == "__main__":
+    import threading
+    bot_thread = threading.Thread(target=bot.run, args=(os.environ['DISCORD_TOKEN'],), daemon=True)
+    bot_thread.start()
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
