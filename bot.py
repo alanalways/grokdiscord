@@ -167,7 +167,7 @@ async def on_message(message):
         return
 
     # 在私人頻道內一問一答
-    if isinstance(message.channel, discord.TextChannel) and channel.name.startswith(f"private-{message.author.name.lower()}"):
+    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name.lower()}"):
         logger.info(f"Processing message in private channel for {message.author}")
         # 檢查是否為刪除頻道指令
         if message.content.lower() == "!delete":
