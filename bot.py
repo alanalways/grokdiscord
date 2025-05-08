@@ -114,6 +114,7 @@ async def on_message(message):
     # 測試 ping 命令
     if message.content.lower() == "!ping":
         await message.channel.send("Pong!")
+        logger.info("Responded with Pong!")
         return
 
     # 觸發私人頻道創建
@@ -121,10 +122,12 @@ async def on_message(message):
         logger.info(f"Creating private channel for {message.author}")
         category = discord.utils.get(guild.categories, name="Private Channels")
         if not category:
+            logger.info("Creating Private Channels category")
             category = await guild.create_category("Private Channels")
 
         channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
         try:
+            logger.info(f"Setting permissions for channel {channel.name}")
             await channel.set_permissions(guild.default_role, read_messages=False)
             await channel.set_permissions(message.author, read_messages=True, send_messages=True)
             await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
@@ -134,8 +137,13 @@ async def on_message(message):
                 await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
 
             await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
-        except discord.errors.Forbidden:
+            logger.info(f"Private channel created and permissions set for {message.author}")
+        except discord.errors.Forbidden as e:
+            logger.error(f"Permission error: {e}")
             await message.channel.send("我缺少管理頻道的權限！請確保我有 'Manage Channels' 權限，並且我的角色層級高於 @everyone。")
+        except Exception as e:
+            logger.error(f"Unexpected error during channel creation: {e}")
+            await message.channel.send("創建頻道時發生錯誤，請檢查伺服器設置或聯繫管理員。")
         return
 
     # 在私人頻道內一問一答
