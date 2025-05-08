@@ -112,15 +112,18 @@ async def on_message(message):
             category = await guild.create_category("Private Channels")
 
         channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
-        await channel.set_permissions(guild.default_role, read_messages=False)
-        await channel.set_permissions(message.author, read_messages=True, send_messages=True)
-        await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
+        try:
+            await channel.set_permissions(guild.default_role, read_messages=False)
+            await channel.set_permissions(message.author, read_messages=True, send_messages=True)
+            await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
 
-        admin_role = discord.utils.get(guild.roles, name="Admin")
-        if admin_role:
-            await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
+            admin_role = discord.utils.get(guild.roles, name="Admin")
+            if admin_role:
+                await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
 
-        await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
+            await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
+        except discord.errors.Forbidden:
+            await message.channel.send("我缺少管理頻道的權限！請確保我有 'Manage Channels' 權限，並且我的角色層級高於 @everyone。")
         return
 
     # 在私人頻道內一問一答
