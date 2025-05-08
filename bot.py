@@ -17,36 +17,61 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 初始化記憶體 SQLite 資料庫
+# 初始化或檢查 SQLite 資料庫
 def init_db():
     conn = sqlite3.connect(':memory:')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS conversations
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id TEXT NOT NULL,
-                  message TEXT NOT NULL,
-                  role TEXT NOT NULL,
-                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    conn.commit()
-    conn.close()
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS conversations
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id TEXT NOT NULL,
+                      message TEXT NOT NULL,
+                      role TEXT NOT NULL,
+                      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        conn.commit()
+    except sqlite3.Error as e:
+        logger.error(f"Database initialization error: {e}")
+    finally:
+        conn.close()
 
 # 儲存對話到資料庫
 def save_message(user_id, message, role):
     conn = sqlite3.connect(':memory:')
     c = conn.cursor()
-    c.execute("INSERT INTO conversations (user_id, message, role) VALUES (?, ?, ?)", (user_id, message, role))
-    conn.commit()
-    conn.close()
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS conversations
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id TEXT NOT NULL,
+                      message TEXT NOT NULL,
+                      role TEXT NOT NULL,
+                      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        c.execute("INSERT INTO conversations (user_id, message, role) VALUES (?, ?, ?)", (user_id, message, role))
+        conn.commit()
+    except sqlite3.Error as e:
+        logger.error(f"Database save error: {e}")
+    finally:
+        conn.close()
 
 # 取得對話歷史
 def get_conversation_history(user_id, limit=10):
     conn = sqlite3.connect(':memory:')
     c = conn.cursor()
-    c.execute("SELECT role, message FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit))
-    history = c.fetchall()
-    conn.close()
-    history.reverse()
-    return [{"role": row[0], "content": row[1]} for row in history]
+    try:
+        c.execute('''CREATE TABLE IF NOT EXISTS conversations
+                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      user_id TEXT NOT NULL,
+                      message TEXT NOT NULL,
+                      role TEXT NOT NULL,
+                      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        c.execute("SELECT role, message FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit))
+        history = c.fetchall()
+        history.reverse()
+        return [{"role": row[0], "content": row[1]} for row in history]
+    except sqlite3.Error as e:
+        logger.error(f"Database query error: {e}")
+        return []
+    finally:
+        conn.close()
 
 # 初始化資料庫
 init_db()
