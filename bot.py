@@ -118,36 +118,49 @@ async def on_message(message):
         return
 
     # 觸發私人頻道創建
-    if bot.user.mentioned_in(message) and not any(channel.name.startswith(f"private-{message.author.name}") for channel in guild.channels):
-        logger.info(f"Creating private channel for {message.author}")
-        category = discord.utils.get(guild.categories, name="Private Channels")
-        if not category:
-            logger.info("Creating Private Channels category")
-            category = await guild.create_category("Private Channels")
+    if bot.user.mentioned_in(message):
+        logger.info(f"Bot mentioned by {message.author}, checking for existing private channel")
+        # 檢查是否已存在私人頻道
+        existing_channel = None
+        for channel in guild.channels:
+            logger.info(f"Checking channel: {channel.name}")
+            if channel.name.startswith(f"private-{message.author.name.lower()}"):
+                existing_channel = channel
+                break
 
-        channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
-        try:
-            logger.info(f"Setting permissions for channel {channel.name}")
-            await channel.set_permissions(guild.default_role, read_messages=False)
-            await channel.set_permissions(message.author, read_messages=True, send_messages=True)
-            await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
+        if existing_channel:
+            logger.info(f"Private channel already exists: {existing_channel.name}")
+            await message.channel.send(f"您已經有一個私人頻道：{existing_channel.mention}！")
+        else:
+            logger.info(f"Creating private channel for {message.author}")
+            category = discord.utils.get(guild.categories, name="Private Channels")
+            if not category:
+                logger.info("Creating Private Channels category")
+                category = await guild.create_category("Private Channels")
 
-            admin_role = discord.utils.get(guild.roles, name="Admin")
-            if admin_role:
-                await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
+            channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
+            try:
+                logger.info(f"Setting permissions for channel {channel.name}")
+                await channel.set_permissions(guild.default_role, read_messages=False)
+                await channel.set_permissions(message.author, read_messages=True, send_messages=True)
+                await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
 
-            await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
-            logger.info(f"Private channel created and permissions set for {message.author}")
-        except discord.errors.Forbidden as e:
-            logger.error(f"Permission error: {e}")
-            await message.channel.send("我缺少管理頻道的權限！請確保我有 'Manage Channels' 權限，並且我的角色層級高於 @everyone。")
-        except Exception as e:
-            logger.error(f"Unexpected error during channel creation: {e}")
-            await message.channel.send("創建頻道時發生錯誤，請檢查伺服器設置或聯繫管理員。")
+                admin_role = discord.utils.get(guild.roles, name="Admin")
+                if admin_role:
+                    await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
+
+                await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
+                logger.info(f"Private channel created and permissions set for {message.author}")
+            except discord.errors.Forbidden as e:
+                logger.error(f"Permission error: {e}")
+                await message.channel.send("我缺少管理頻道的權限！請確保我有 'Manage Channels' 權限，並且我的角色層級高於 @everyone。")
+            except Exception as e:
+                logger.error(f"Unexpected error during channel creation: {e}")
+                await message.channel.send("創建頻道時發生錯誤，請檢查伺服器設置或聯繫管理員。")
         return
 
     # 在私人頻道內一問一答
-    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name}"):
+    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name.lower()}"):
         logger.info(f"Processing message in private channel for {message.author}")
         # 檢查是否為刪除頻道指令
         if message.content.lower() == "!delete":
