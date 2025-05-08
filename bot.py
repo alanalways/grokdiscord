@@ -2,162 +2,163 @@ import discord
 from discord.ext import commands
 import os
 import requests
-import json
-import aiosqlite
-import asyncio
-from dotenv import load_dotenv
-import base64
-from io import BytesIO
-from PIL import Image
+import sqlite3
+from datetime import datetime
+from bs4 import BeautifulSoup
 
-# 加載環境變數
-load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GROK_API_KEY = os.getenv("GROK_API_KEY")
-
-# 設置 Discord 機器人
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+intents.members = True
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 資料庫初始化
-async def init_db():
-    async with aiosqlite.connect("conversations.db") as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                user_id INTEGER,
-                channel_id INTEGER,
-                message TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        await db.commit()
+# 初始化記憶體 SQLite 資料庫
+def init_db():
+    conn = sqlite3.connect(':memory:')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS conversations
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id TEXT NOT NULL,
+                  message TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.commit()
+    conn.close()
 
-# 儲存對話
-async def store_conversation(user_id, channel_id, message):
-    async with aiosqlite.connect("conversations.db") as db:
-        await db.execute(
-            "INSERT INTO conversations (user_id, channel_id, message) VALUES (?, ?, ?)",
-            (user_id, channel_id, message)
-        )
-        await db.commit()
+# 儲存對話到資料庫
+def save_message(user_id, message, role):
+    conn = sqlite3.connect(':memory:')
+    c = conn.cursor()
+    c.execute("INSERT INTO conversations (user_id, message, role) VALUES (?, ?, ?)", (user_id, message, role))
+    conn.commit()
+    conn.close()
 
-# 獲取對話歷史
-async def get_conversation(user_id, limit=10):
-    async with aiosqlite.connect("conversations.db") as db:
-        async with db.execute(
-            "SELECT message FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
-            (user_id, limit)
-        ) as cursor:
-            return [row[0] async for row in cursor]
+# 取得對話歷史
+def get_conversation_history(user_id, limit=10):
+    conn = sqlite3.connect(':memory:')
+    c = conn.cursor()
+    c.execute("SELECT role, message FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?", (user_id, limit))
+    history = c.fetchall()
+    conn.close()
+    history.reverse()
+    return [{"role": row[0], "content": row[1]} for row in history]
 
-# 調用 Grok API
-async def call_grok_api(prompt, image=None, mode="text"):
-    url = "https://api.x.ai/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {GROK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": "grok-beta",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2048
-    }
-    
-    if image and mode == "image_analysis":
-        # 圖片分析
-        image_data = base64.b64encode(image.read()).decode("utf-8")
-        data["messages"][0]["content"] = [
-            {"type": "text", "text": prompt},
-            {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_data}"}
-        ]
-    elif mode == "image_generation":
-        # 圖片生成
-        data["model"] = "flux.1"  # 假設支持 Flux.1
-        data["messages"][0]["content"] = f"Generate an image: {prompt}"
+# 初始化資料庫
+init_db()
 
-    response = requests.post(url, headers=headers, json=data)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        return {"error": f"API request failed: {response.text}"}
+# 聯網搜尋功能
+def web_search(query):
+    try:
+        search_url = f"https://www.google.com/search?q={query}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        response = requests.get(search_url, headers=headers)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        results = soup.find_all('div', class_='BNeawe s3v9rd AP7Wnd')
+        if results:
+            return results[0].get_text()[:500]
+        return "無法從網路上找到相關資訊。"
+    except Exception as e:
+        return f"搜尋失敗：{str(e)}"
 
-# 機器人啟動事件
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
-    await init_db()
+# 調用 Grok API 的通用函數
+def call_grok_api(messages, model, image_url=None):
+    headers = {"Authorization": f"Bearer {os.environ['GROK_API_KEY']}", "Content-Type": "application/json"}
+    data = {"model": model, "messages": messages, "max_tokens": 1000}
+    if image_url:
+        data["messages"].append({"role": "user", "content": [{"type": "image_url", "image_url": {"url": image_url}}]})
+    try:
+        response = requests.post("https://api.x.ai/v1/chat/completions", headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']
+    except requests.RequestException as e:
+        return f"錯誤：無法連接到 xAI API - {str(e)}"
 
-# 創建私人頻道
-async def create_private_channel(guild, user):
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    }
-    for role in guild.roles:
-        if role.permissions.administrator:
-            overwrites[role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
-    
-    channel = await guild.create_text_channel(
-        f"private-{user.name}",
-        overwrites=overwrites
-    )
-    return channel
+# 生成圖片的函數
+def generate_image(prompt):
+    headers = {"Authorization": f"Bearer {os.environ['GROK_API_KEY']}", "Content-Type": "application/json"}
+    data = {"model": "grok-2-image-1212", "prompt": prompt}
+    try:
+        response = requests.post("https://api.x.ai/v1/image/generations", headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()["data"][0]["url"]
+    except requests.RequestException as e:
+        return f"錯誤：無法生成圖片 - {str(e)}"
 
-# 處理訊息
+# 檢查是否為圖片生成請求
+def is_image_generation_request(message):
+    keywords = ["生成圖片", "畫", "圖片", "繪製", "create image", "draw"]
+    return any(keyword in message.lower() for keyword in keywords)
+
+# 自動創建私人頻道（觸發於標記 Bot）
 @bot.event
 async def on_message(message):
-    if message.author.bot:
+    if message.author == bot.user:
         return
-    
-    if bot.user in message.mentions:
-        # 創建私人頻道
-        channel = await create_private_channel(message.guild, message.author)
-        await message.channel.send(f"已為你創建私人頻道：{channel.mention}")
-        
-        # 儲存對話
-        await store_conversation(message.author.id, channel.id, message.content)
-        
-        # 獲取對話歷史
-        history = await get_conversation(message.author.id)
-        context = "\n".join(history[::-1])  # 倒序組成上下文
-        
-        # 處理圖片
-        if message.attachments:
-            attachment = message.attachments[0]
-            if attachment.content_type.startswith("image/"):
-                image = BytesIO()
-                await attachment.save(image)
-                prompt = f"Analyze this image and respond to: {message.content}"
-                response = await call_grok_api(prompt, image, mode="image_analysis")
-            else:
-                response = await call_grok_api(f"Non-image attachment received: {message.content}")
-        else:
-            # 檢查是否要求圖片生成
-            if "generate image" in message.content.lower():
-                prompt = message.content.replace("generate image", "").strip()
-                response = await call_grok_api(prompt, mode="image_generation")
-            else:
-                # 普通對話或聯網搜尋
-                prompt = f"Context: {context}\nUser: {message.content}"
-                response = await call_grok_api(prompt)
-        
-        # 處理回應
-        if "error" in response:
-            await channel.send(f"錯誤：{response['error']}")
-        else:
-            content = response["choices"][0]["message"]["content"]
-            if response.get("image"):  # 假設 API 返回圖片
-                image_data = base64.b64decode(response["image"])
-                image = Image.open(BytesIO(image_data))
-                image.save("output.png")
-                await channel.send(file=discord.File("output.png"))
-            else:
-                await channel.send(content)
-    
-    await bot.process_commands(message)
 
-# 啟動機器人
-bot.run(DISCORD_TOKEN)
+    user_id = str(message.author.id)
+    guild = message.guild
+
+    # 觸發私人頻道創建
+    if bot.user.mentioned_in(message) and not any(channel.name.startswith(f"private-{message.author.name}") for channel in guild.channels):
+        category = discord.utils.get(guild.categories, name="Private Channels")
+        if not category:
+            category = await guild.create_category("Private Channels")
+
+        channel = await guild.create_text_channel(f"private-{message.author.name}-{message.author.discriminator}", category=category)
+        await channel.set_permissions(guild.default_role, read_messages=False)
+        await channel.set_permissions(message.author, read_messages=True, send_messages=True)
+        await channel.set_permissions(bot.user, read_messages=True, send_messages=True)
+
+        admin_role = discord.utils.get(guild.roles, name="Admin")
+        if admin_role:
+            await channel.set_permissions(admin_role, read_messages=True, send_messages=True)
+
+        await message.channel.send(f"為您創建了私人頻道：{channel.mention}！")
+        return
+
+    # 在私人頻道內一問一答
+    if isinstance(message.channel, discord.TextChannel) and message.channel.name.startswith(f"private-{message.author.name}"):
+        # 檢查是否為刪除頻道指令
+        if message.content.lower() == "!delete":
+            await message.channel.send("正在刪除此頻道...")
+            await message.channel.delete()
+            return
+
+        # 處理圖片訊息
+        if message.attachments:
+            image_url = message.attachments[0].url
+            save_message(user_id, "用戶傳送了一張圖片", "user")
+
+            conversation_history = get_conversation_history(user_id)
+            conversation_history.append({"role": "user", "content": "請描述這張圖片的內容"})
+            reply = call_grok_api(conversation_history, model="grok-2-vision-1212", image_url=image_url)
+
+            save_message(user_id, reply, "assistant")
+            await message.channel.send(reply)
+            return
+
+        # 處理文字訊息
+        save_message(user_id, message.content, "user")
+
+        conversation_history = get_conversation_history(user_id)
+        conversation_history.append({"role": "user", "content": message.content})
+
+        if is_image_generation_request(message.content):
+            image_url = generate_image(message.content)
+            if "錯誤" in image_url:
+                await message.channel.send(image_url)
+            else:
+                save_message(user_id, "生成了一張圖片", "assistant")
+                await message.channel.send(file=discord.File(requests.get(image_url, stream=True).raw))
+            return
+        else:
+            reply = call_grok_api(conversation_history, model="grok-3-beta")
+            if len(reply) < 50 or "錯誤" in reply:
+                reply = web_search(message.content)
+            save_message(user_id, reply, "assistant")
+            await message.channel.send(reply)
+
+@bot.event
+async def on_ready():
+    print(f'{bot.user} 已上線！')
+
+bot.run(os.environ['DISCORD_TOKEN'])
